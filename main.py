@@ -80,7 +80,9 @@ def eval_pipeline(task_id: str, model_name: str):
             new_model_name,
         ),
     )
-    output_model.update_weights(os.path.join(os.path.dirname(model_output_path), new_model_name))
+    output_model.update_weights(
+        os.path.join(os.path.dirname(model_output_path), new_model_name)
+    )
     labels = [
         "person",
         "car",
@@ -113,7 +115,12 @@ def eval_pipeline(task_id: str, model_name: str):
             "Support": [263, 55, 35, 33, 9, 16, 13, 13, 13, 17],
         }
     )
-    output_model.report_table(title="Evaluation Metrics", series="Evaluation Metrics", iteration=0, table_plot=data)
+    output_model.report_table(
+        title="Evaluation Metrics",
+        series="Evaluation Metrics",
+        iteration=0,
+        table_plot=data,
+    )
     class_names = [
         "person",
         "car",

@@ -10,6 +10,7 @@ dependencies = [
     "fiftyone>=1.5.2",
     "ipython>=8.36.0",
     "isort>=6.0.1",
+    "loguru>=0.7.3",
     "ruff>=0.11.9",
 ]
 
