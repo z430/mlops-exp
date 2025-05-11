@@ -11,6 +11,7 @@ import os
 import tqdm
 import os
 from pathlib import Path
+import pandas as pd
 
 PROJECT_NAME = "DetectionEvaluation"
 COCO_LABELS = {
@@ -93,8 +94,9 @@ COCO_LABELS = {
     "scissors": 76,
     "teddy bear": 77,
     "hair drier": 78,
-    "toothbrush": 79
+    "toothbrush": 79,
 }
+
 
 def load_model(model_path: str):
     model = torch.hub.load(
@@ -104,6 +106,7 @@ def load_model(model_path: str):
         force_reload=True,
     )
     return model
+
 
 def eval(dataset, model):
     for sample in tqdm.tqdm(dataset, desc="Evaluating samples", total=len(dataset)):
@@ -140,6 +143,31 @@ def eval(dataset, model):
 
     return
 
+
+def fo_evaluatae(dataset, gt_field, pred_field):
+    # Evaluate the dataset
+    results = fo.evaluate_detections(
+        dataset,
+        gt_field=gt_field,
+        pred_field=pred_field,
+        compute_mAP=True,
+        eval_key=f"eval_{pred_field}",
+    )
+    map = results.mAP()
+    return results.report(), map
+
+
+def clearml_report_histogram(clearml_logger, title, series, values, xlabels, yaxis):
+    clearml_logger.report_histogram(
+        title=title,
+        series=series,
+        iteration=0,
+        values=values,
+        xlabels=xlabels,
+        yaxis=yaxis,
+    )
+
+
 def main(args):
     try:
         dataset = fo.load_dataset(args.dataset)
@@ -155,37 +183,76 @@ def main(args):
 
     # evaluate
     # model = load_model(model_path)
-    new_model_name = (
-        f"{args.model_name.lower()}_v{training_time.strftime('%Y%m%d')}.pt"
-    )
-    
+    new_model_name = f"{args.model_name.lower()}_v{training_time.strftime('%Y%m%d')}.pt"
+
     task_name = (
         f"{args.model_name.upper()} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
     task = Task.init(project_name=PROJECT_NAME, task_name=task_name)
+    task_logger = task.logger
 
-    # eval 
-    # eval(dataset, model_path)
+    report, map = fo_evaluatae(
+        dataset,
+        gt_field="ground_truth",
+        pred_field="preds_yolov5l_v20250511",
+    )
 
-    # Create a new output model
-    output_model = OutputModel(
-        task=task,
-        label_enumeration=COCO_LABELS,
-        name=new_model_name,
-        framework="pytorch",
+    df = pd.DataFrame(report)
+    df = df.transpose().loc[list(COCO_LABELS.keys())]
+
+    precision = df["precision"]
+    recall = df["recall"]
+    f1_score = df["f1-score"]
+    support = df["support"]
+    mAP = map
+
+    task_logger.report_table(
+        title=f"Evaluation Report - {datetime.now().strftime('%Y-%m-%d')}",
+        series="Evaluation Report",
+        table_plot=df,
+        iteration=0,
     )
-    shutil.copy(
-        model_path,
-        os.path.join(
-            os.path.dirname(model_path),
-            new_model_name,
-        ),
+    clearml_report_histogram(
+        task_logger,
+        "Precision",
+        "Precision",
+        precision,
+        COCO_LABELS.keys(),
+        "Precision",
     )
-    logger.info(f"{model_path} copied to {os.path.join(os.path.dirname(model_path), new_model_name)}")
-    logger.info(os.path.join(os.path.dirname(model_path), new_model_name))
-    
-    new_model_path = Path(os.path.join(os.path.dirname(model_path), new_model_name)) 
-    output_model.update_weights(weights_filename=str(Path(new_model_path).resolve()))
+    clearml_report_histogram(
+        task_logger,
+        "Recall",
+        "Recall",
+        recall,
+        COCO_LABELS.keys(),
+        "Recall",
+    )
+    clearml_report_histogram(
+        task_logger,
+        "F1 Score",
+        "F1 Score",
+        f1_score,
+        COCO_LABELS.keys(),
+        "F1 Score",
+    )
+    clearml_report_histogram(
+        task_logger,
+        "Support",
+        "Support",
+        support,
+        COCO_LABELS.keys(),
+        "Support",
+    )
+    clearml_report_histogram(
+        task_logger,
+        "mAP",
+        "mAP",
+        [mAP],
+        ["mAP"],
+        "mAP",
+    )
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
