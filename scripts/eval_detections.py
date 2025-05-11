@@ -108,7 +108,8 @@ def load_model(model_path: str):
     return model
 
 
-def eval(dataset, model):
+def eval(dataset, model, model_version):
+    pred_field = f"preds_{model_version}"
     for sample in tqdm.tqdm(dataset, desc="Evaluating samples", total=len(dataset)):
         sample_id = sample.id
         try:
@@ -136,12 +137,12 @@ def eval(dataset, model):
                         ],
                     )
                 )
-            sample["preds_v20250510"] = fo.Detections(detections=detections)
+            sample[pred_field] = fo.Detections(detections=detections)
             sample.save()
         except Exception as e:
             logger.error(f"Failed to evaluate sample: {sample_id}. Error: {e}")
 
-    return
+    return pred_field
 
 
 def fo_evaluatae(dataset, gt_field, pred_field):
@@ -154,7 +155,7 @@ def fo_evaluatae(dataset, gt_field, pred_field):
         eval_key=f"eval_{pred_field}",
     )
     map = results.mAP()
-    return results.report(), map
+    return results.report(), map, results.confusion_matrix()
 
 
 def clearml_report_histogram(clearml_logger, title, series, values, xlabels, yaxis):
@@ -182,19 +183,22 @@ def main(args):
     training_time = clearml_task._get_last_update()
 
     # evaluate
-    # model = load_model(model_path)
-    new_model_name = f"{args.model_name.lower()}_v{training_time.strftime('%Y%m%d')}.pt"
+    model = load_model(model_path)
 
-    task_name = (
-        f"{args.model_name.upper()} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    )
+    task_name = f"{args.exp}"
     task = Task.init(project_name=PROJECT_NAME, task_name=task_name)
     task_logger = task.logger
+    task.set_input_model(model_id=model_output.id)
+    task.set_model_label_enumeration(COCO_LABELS)
+    task.set_parent(clearml_task.id)
 
-    report, map = fo_evaluatae(
+    model_name = f"yolov5l_v{training_time.strftime('%Y%m%d')}"
+    pred_field = eval(dataset, model, model_name)
+
+    report, map, cm = fo_evaluatae(
         dataset,
         gt_field="ground_truth",
-        pred_field="preds_yolov5l_v20250511",
+        pred_field=pred_field,
     )
 
     df = pd.DataFrame(report)
@@ -252,6 +256,14 @@ def main(args):
         ["mAP"],
         "mAP",
     )
+    task_logger.report_confusion_matrix(
+        title="Confusion Matrix",
+        series="Eval",
+        iteration=0,
+        matrix=cm,
+        xlabels=list(COCO_LABELS.keys()),  # predicted labels
+        ylabels=list(COCO_LABELS.keys()),  # true labels
+    )
 
 
 def parse_arguments():
@@ -262,7 +274,7 @@ def parse_arguments():
         "--task_id", type=str, required=True, help="Task ID in string format."
     )
     parser.add_argument(
-        "--model_name", type=str, required=True, help="Model name in string format."
+        "--exp", type=str, required=True, help="Model name in string format."
     )
     parser.add_argument(
         "--dataset", type=str, required=True, help="Dataset in string format."
@@ -273,6 +285,6 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
     logger.info(f"Task ID: {args.task_id}")
-    logger.info(f"Model Name: {args.model_name}")
+    logger.info(f"Model Name: {args.exp}")
     logger.info(f"Dataset: {args.dataset}")
     main(args)
